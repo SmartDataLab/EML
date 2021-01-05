@@ -27,6 +27,10 @@ def get_window_data(df, idx, half_window_len):
     return data
 
 
+def calc_window_feature():
+    pass
+
+
 data_list = []
 for i in range(len(df)):
     data = get_window_data(df, i, 10)
