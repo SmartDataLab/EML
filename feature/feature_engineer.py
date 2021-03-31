@@ -9,9 +9,48 @@ from sklearn.preprocessing import StandardScaler
 import matplotlib.pyplot as plt
 from sklearn.linear_model import Lasso
 from .quaternion import Quaternion
+import numpy as np
 
 
-def add_euler_angle(df, w_column, x_column, y_column, z_column):
+def get_circle_mean(partial_series):
+    return np.angle(np.exp(partial_series * 1j).sum())
+
+
+def get_mathematical_mean(partial_series):
+    return np.mean(partial_series)
+
+
+def get_circle_diff(partial_series, local_center):
+    diff = partial_series.apply(
+        lambda x: x
+        - local_center
+        - 2 * np.pi * ((x - local_center + np.pi) // (2 * np.pi))
+    )
+    return diff
+
+
+def get_mathematical_diff(partial_series, local_center):
+    return partial_series - local_center
+
+
+def partial_norm(df_euler, start_idx, end_idx, yaw_idx, method="circle"):
+    df_euler_ = df_euler.copy()
+    mean_fun = {"circle": get_circle_mean, "mathematical": get_mathematical_mean}[
+        method
+    ]
+    diff_fun = {"circle": get_circle_diff, "mathematical": get_mathematical_diff}[
+        method
+    ]
+    local_center = mean_fun(df_euler_.iloc[start_idx:end_idx, yaw_idx])
+    df_euler_.iloc[start_idx:end_idx, yaw_idx] = diff_fun(
+        df_euler_.iloc[start_idx:end_idx, yaw_idx], local_center
+    )
+    return df_euler_
+
+
+def add_euler_angle(
+    df, w_column, x_column, y_column, z_column, yaw_norm="glocal-mathematical"
+):
     df_euler = df.copy()
     df_euler["roll"] = 0
     df_euler["pitch"] = 0
@@ -25,22 +64,42 @@ def add_euler_angle(df, w_column, x_column, y_column, z_column):
         df_euler.loc[i, "roll"] = roll
         df_euler.loc[i, "pitch"] = pitch
         df_euler.loc[i, "yaw"] = yaw
-    df_euler["yaw"] -= df_euler["yaw"].mean()
+
+    yaw_idx = list(df_euler.columns).index("yaw")
+    if yaw_norm.split("-")[0] == "global":
+        df_euler = partial_norm(
+            df_euler,
+            0,
+            len(df_euler),
+            yaw_idx,
+            method=yaw_norm.split("-")[1],
+        )
+    elif yaw_norm.split("-")[0] == "local":
+        local_window_size = 123
+        for i in range(len(df_euler) // local_window_size):
+            df_euler = partial_norm(
+                df_euler,
+                i * local_window_size,
+                i * local_window_size + local_window_size,
+                yaw_idx,
+                method=yaw_norm.split("-")[1],
+            )
+        if i * local_window_size + local_window_size < len(df_euler):
+            df_euler = partial_norm(
+                df_euler,
+                i * local_window_size + local_window_size,
+                len(df_euler),
+                yaw_idx,
+                method=yaw_norm.split("-")[1],
+            )
+
     return df_euler
 
 
 def get_ENU_euler_angle(w, x, y, z, os_type="Android"):
     q = Quaternion(w=w, x=x, y=y, z=z)
-    euler_angle = q.to_rpy()  #
-    # if os_type == "Android":
+    euler_angle = q.to_rpy()
     return euler_angle  # East North Up: most use
-    # else:
-    #     euler_angle = (
-    #         euler_angle[1],
-    #         -euler_angle[0],
-    #         -euler_angle[2],
-    #     )  # North West Down
-    #     return euler_angle
 
 
 def get_axisdata_distance(df, axis_feature_list):
